@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Payment Successful - AutoPlayer</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            text-align: center;
+            padding: 50px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+        }
+        .success-icon {
+            font-size: 60px;
+            margin-bottom: 20px;
+        }
+        h1 {
+            margin: 0 0 10px 0;
+            font-size: 32px;
+        }
+        p {
+            font-size: 16px;
+            line-height: 1.5;
+            opacity: 0.9;
+            margin-bottom: 30px;
+        }
+        .button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .button:hover {
+            transform: translateY(-2px);
+        }
+        .instructions {
+            font-size: 14px;
+            opacity: 0.7;
+            margin-top: 20px;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="success-icon">🎉</div>
+        <h1>Payment Successful!</h1>
+        <p>Thank you for purchasing AutoPlayer Premium.</p>
+        <p>Your access has been activated automatically.</p>
+        
+        <button class="button" onclick="closeWindow()">Close Window</button>
+        
+        <div id="extension-message" class="instructions hidden">
+            <p>Return to the AutoPlayer extension to start using premium features.</p>
+        </div>
+        
+        <div id="manual-message" class="instructions">
+            <p><strong>If premium features don't activate automatically:</strong></p>
+            <p>1. Copy this code: <code id="session-code"></code></p>
+            <p>2. Open AutoPlayer extension</p>
+            <p>3. Paste the code in the "Activate Premium" section</p>
+        </div>
+    </div>
+
+    <script>
+        // Get parameters from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const sessionId = urlParams.get('session_id');
+        const extensionId = urlParams.get('extension_id');
+        
+        // Display session code for manual entry
+        if (sessionId) {
+            document.getElementById('session-code').textContent = sessionId.substring(0, 12) + '...';
+        }
+        
+        // Try to communicate with the Chrome extension
+        function sendToExtension() {
+            if (!sessionId) return;
+            
+            // Method 1: Chrome runtime messaging (if opened by extension)
+            if (chrome && chrome.runtime && extensionId) {
+                try {
+                    chrome.runtime.sendMessage(extensionId, {
+                        type: 'PAYMENT_SUCCESS',
+                        sessionId: sessionId,
+                        timestamp: Date.now()
+                    }, (response) => {
+                        if (response && response.success) {
+                            console.log('✅ Message sent to extension successfully');
+                            document.getElementById('extension-message').classList.remove('hidden');
+                            document.getElementById('manual-message').classList.add('hidden');
+                        }
+                    });
+                } catch (error) {
+                    console.log('Extension not reachable directly');
+                }
+            }
+            
+            // Method 2: LocalStorage for extension to read
+            localStorage.setItem('autoplayer_payment_data', JSON.stringify({
+                sessionId: sessionId,
+                timestamp: Date.now(),
+                verified: false
+            }));
+            
+            // Method 3: Broadcast to all tabs
+            if (chrome && chrome.tabs) {
+                chrome.tabs.query({}, (tabs) => {
+                    tabs.forEach(tab => {
+                        chrome.tabs.sendMessage(tab.id, {
+                            type: 'PAYMENT_COMPLETE',
+                            sessionId: sessionId
+                        }).catch(() => {
+                            // Tab might not have content script
+                        });
+                    });
+                });
+            }
+            
+            // Method 4: Post message to opener (if opened by extension)
+            if (window.opener) {
+                window.opener.postMessage({
+                    type: 'STRIPE_PAYMENT_SUCCESS',
+                    sessionId: sessionId,
+                    source: 'github_pages'
+                }, '*');
+            }
+        }
+        
+        // Try to send immediately
+        sendToExtension();
+        
+        // Also try after a short delay
+        setTimeout(sendToExtension, 1000);
+        
+        // Close window function
+        function closeWindow() {
+            // One final attempt to communicate
+            sendToExtension();
+            
+            // Try to close the window
+            setTimeout(() => {
+                if (window.history.length > 1) {
+                    window.history.back();
+                } else {
+                    window.close();
+                }
+            }, 500);
+        }
+        
+        // Auto-close after 5 seconds
+        setTimeout(closeWindow, 5000);
+        
+        // Listen for extension asking for data
+        window.addEventListener('message', (event) => {
+            if (event.data.type === 'REQUEST_PAYMENT_DATA' && sessionId) {
+                event.source.postMessage({
+                    type: 'PAYMENT_DATA',
+                    sessionId: sessionId
+                }, event.origin);
+            }
+        });
+    </script>
+</body>
+</html>
